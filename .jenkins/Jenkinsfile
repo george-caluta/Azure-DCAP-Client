@@ -11,8 +11,8 @@ def ACCTest(String label, String version, String compiler, String build_type) {
 
             // Generate libdcap_quoteprov.so in the $WORKSPACE/src/Linux folder
             def task = """
-                       ./configure
-                       make
+                        ./configure
+                        make
                        """
             dir("${WORKSPACE}/src/Linux") {
                 oe.ContainerRun("az-dcap-tools-${version}", compiler, task)
@@ -23,9 +23,9 @@ def ACCTest(String label, String version, String compiler, String build_type) {
                 git url: 'https://github.com/Microsoft/openenclave.git'
             }
             def task = """
-                       cmake ${WORKSPACE}/openenclave -DCMAKE_BUILD_TYPE=${build_type}
-                       make
-                       ctest --output-on-failure
+                        cmake ${WORKSPACE}/openenclave -DCMAKE_BUILD_TYPE=${build_type}
+                        make
+                        ctest --output-on-failure
                        """
             dir("${WORKSPACE}/openenclave/build") {
                 withEnv(["LD_LIBRARY_PATH=${WORKSPACE}/src/Linux"]) {
@@ -45,7 +45,7 @@ def ACCContainerTest(String label, String version) {
 
             // build az-dcap-client deb package
             def task = """
-                       dpkg-buildpackage -us -uc
+                        dpkg-buildpackage -us -uc
                        """
             dir("${WORKSPACE}/src/Linux") {
                 oe.ContainerRun("az-dcap-tools-${version}", 'clang-7', task)
@@ -72,9 +72,7 @@ def ACCContainerTest(String label, String version) {
                        """
 
             dir("${WORKSPACE}/src") {
-                withEnv(["CC=clang-7","CXX=clang++-7"]) {
-                    oe.ContainerRun("oetools-full-${version}", 'clang-7', task, '-u root --device /dev/sgx:/dev/sgx')
-                }
+                oe.ContainerRun("oetools-full-${version}", 'clang-7', task, '-u root --device /dev/sgx:/dev/sgx')
             }
         }
     }
@@ -88,16 +86,12 @@ def ACCTestOeRelease(String label, String version) {
 
             // build az-dcap-client deb package
             def task = """
-                       dpkg-buildpackage -us -uc
+                        dpkg-buildpackage -us -uc
                        """
             dir("${WORKSPACE}/src/Linux") {
                 oe.ContainerRun("az-dcap-tools-${version}", 'clang-7', task)
             }
 
-            // Clone openenclave repo
-            dir('openenclave') {
-                git url: 'https://github.com/Microsoft/openenclave.git'
-            }
             /*
             Use oetools-full-${version} Dockerfile from Openenclave repository
             Remove the installed az-dcap-client from the container
@@ -105,21 +99,19 @@ def ACCTestOeRelease(String label, String version) {
             then install the open-enclave package and run the samples
             */
             def task = """
-            apt remove -y az-dcap-client
-            dpkg -i az-dcap-client_*_amd64.deb
-            apt-get install -y open-enclave
-            . /opt/openenclave/share/openenclave/openenclaverc
-            cp -r /opt/openenclave/share/openenclave/samples/ ~/samples
-            for DIR in $(find ~/samples/* -maxdepth 0 -type d); do
-                cd $DIR
-                make build
-                make run
-            done
-            """
+                        apt remove -y az-dcap-client
+                        dpkg -i az-dcap-client_*_amd64.deb
+                        apt-get install -y open-enclave
+                        . /opt/openenclave/share/openenclave/openenclaverc
+                        cp -r /opt/openenclave/share/openenclave/samples/ ~/samples
+                        for DIR in $(find ~/samples/* -maxdepth 0 -type d); do
+                            cd $DIR
+                            make build
+                            make run
+                        done
+                        """
             dir("${WORKSPACE}/src") {
-                withEnv(["CC=clang-7","CXX=clang++-7"]) {
-                    oe.ContainerRun("oetools-full-${version}", 'clang-7', task, '-u root --device /dev/sgx:/dev/sgx')
-                }
+                oe.ContainerRun("oetools-full-${version}", 'clang-7', task, '-u root --device /dev/sgx:/dev/sgx')
             }
         }
     }
