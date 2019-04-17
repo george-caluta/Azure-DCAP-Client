@@ -49,7 +49,7 @@ def ACCContainerTest(String label, String version) {
                        dpkg-buildpackage -us -uc
                        """
             dir("${WORKSPACE}/src/Linux") {
-                oe.ContainerRun("az-dcap-tools-${version}", compiler, task)
+                oe.ContainerRun("az-dcap-tools-${version}", 'clang-7', task)
             }
 
             // Clone openenclave repo
@@ -94,7 +94,7 @@ def ACCTestOeRelease(String label, String version) {
                        dpkg-buildpackage -us -uc
                        """
             dir("${WORKSPACE}/src/Linux") {
-                oe.ContainerRun("az-dcap-tools-${version}", compiler, task)
+                oe.ContainerRun("az-dcap-tools-${version}", 'clang-7', task)
             }
 
             // Clone openenclave repo
