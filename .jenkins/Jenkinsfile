@@ -1,53 +1,35 @@
-String dockerBuildArgs(String... args) {
-    String argumentString = ""
-    for(arg in args) {
-        argumentString += " --build-arg ${arg}"
-    }
-    return argumentString
-}
+// common lib definition
+@Library("OpenEnclaveCommon") _
+oe = new jenkins.common.Openenclave()
 
 // Tests running on hardware with custom path to libdcap_quoteprov.so
 def ACCTest(String label, String version, String compiler, String build_type) {
-    def c_compiler = "clang-7"
-    def cpp_compiler = "clang++-7"
-    if (compiler == "gcc") {
-        c_compiler = "gcc"
-        cpp_compiler = "g++"
-    }
     stage("${label} ${compiler} SGX1-FLC ${build_type}") {
         node("${label}") {
             cleanWs()
             checkout scm
 
-            // Get Jenkins user and group for docker image
-            String buildArgs = dockerBuildArgs("UID=\$(id -u)",
-                                               "GID=\$(id -g)",
-                                               "UNAME=\$(id -un)",
-                                               "GNAME=\$(id -gn)",
-                                               "ubuntu_version=${version}")
-
             // Generate libdcap_quoteprov.so in the $WORKSPACE/src/Linux folder
-            def buildImage = docker.build("az-dcap-builder", "${buildArgs} ${WORKSPACE}/.jenkins")
-            buildImage.inside {
-                dir('src/Linux') {
-                    sh './configure'
-                    sh 'make'
-                }
+            def task = """
+                        ./configure
+                        make
+                       """
+            dir("${WORKSPACE}/src/Linux") {
+                oe.ContainerRun("az-dcap-tools-${version}", compiler, task)
             }
 
             // Run hardware tests using custom LD_PRELOAD
-            dir('openenclave') {
+            dir("${WORKSPACE}/openenclave") {
                 git url: 'https://github.com/Microsoft/openenclave.git'
             }
-            dir('openenclave/build') {
-                withEnv(["CC=${c_compiler}","CXX=${cpp_compiler}","LD_LIBRARY_PATH=${WORKSPACE}/src/Linux"]) {
-                    timeout(15) {
-                        sh """
+            def task = """
                         cmake ${WORKSPACE}/openenclave -DCMAKE_BUILD_TYPE=${build_type}
                         make
                         ctest --output-on-failure
-                        """
-                    }
+                       """
+            dir("${WORKSPACE}/openenclave/build") {
+                withEnv(["LD_LIBRARY_PATH=${WORKSPACE}/src/Linux"]) {
+                    oe.Run(compiler, task)
                 }
             }
         }
@@ -61,19 +43,12 @@ def ACCContainerTest(String label, String version) {
             cleanWs()
             checkout scm
 
-            // Get Jenkins user and group for docker image
-            String buildArgs = dockerBuildArgs("UID=\$(id -u)",
-                                               "GID=\$(id -g)",
-                                               "UNAME=\$(id -un)",
-                                               "GNAME=\$(id -gn)",
-                                               "ubuntu_version=${version}")
-
             // build az-dcap-client deb package
-            def buildImage = docker.build("az-dcap-builder", "${buildArgs} ${WORKSPACE}/.jenkins")
-            buildImage.inside {
-                dir('src/Linux') {
-                    sh 'dpkg-buildpackage -us -uc'
-                }
+            def task = """
+                        dpkg-buildpackage -us -uc
+                       """
+            dir("${WORKSPACE}/src/Linux") {
+                oe.ContainerRun("az-dcap-tools-${version}", 'clang-7', task)
             }
 
             // Clone openenclave repo
@@ -81,28 +56,23 @@ def ACCContainerTest(String label, String version) {
                 git url: 'https://github.com/Microsoft/openenclave.git'
             }
             /*
-            Use oetools-azure Dockerfile from Openenclave repository
+            Use oetools-full-${version} Dockerfile from Openenclave repository
             Remove the installed az-dcap-client from the container
             Install az-dcap-client in the container from the deb package we previously built
             */
-            def oetoolsImage = docker.build("oetools-test-${version}", "${buildArgs} -f openenclave/.jenkins/Dockerfile ./openenclave")
-            /*
-            This is build from oetoolsImage, must be built without cache so it actually installs
-            the current build of az-dcap-client from the .deb we just built
-            */
-            def testImage = docker.build("az-dcap-test-${version}", "${buildArgs} --no-cache -f .jenkins/Dockerfile.scripts .")
-            testImage.inside('--device /dev/sgx:/dev/sgx') {
-                dir('openenclave/build') {
-                    timeout(15) {
-                        withEnv(["CC=clang-7","CXX=clang++-7"]) {
-                            sh """
-                            cmake ${WORKSPACE}/openenclave -DCMAKE_BUILD_TYPE=RelWithDebInfo
-                            make
-                            ctest --output-on-failure
-                            """
-                        }
-                    }
-                }
+
+            def task = """
+                        apt remove -y az-dcap-client
+                        dpkg -i az-dcap-client_*_amd64.deb
+                        mkdir -p openenclave/build
+                        cd openenclave/build
+                        cmake ${WORKSPACE}/openenclave -DCMAKE_BUILD_TYPE=RelWithDebInfo
+                        make
+                        ctest --output-on-failure
+                       """
+
+            dir("${WORKSPACE}/src") {
+                oe.ContainerRun("oetools-full-${version}", 'clang-7', task, '-u root --device /dev/sgx:/dev/sgx')
             }
         }
     }
@@ -114,51 +84,34 @@ def ACCTestOeRelease(String label, String version) {
             cleanWs()
             checkout scm
 
-            // Get Jenkins user and group for docker image
-            String buildArgs = dockerBuildArgs("UID=\$(id -u)",
-                                               "GID=\$(id -g)",
-                                               "UNAME=\$(id -un)",
-                                               "GNAME=\$(id -gn)",
-                                               "ubuntu_version=${version}")
-
             // build az-dcap-client deb package
-            def buildImage = docker.build("az-dcap-builder", "${buildArgs} ${WORKSPACE}/.jenkins")
-            buildImage.inside {
-                dir('src/Linux') {
-                    sh 'dpkg-buildpackage -us -uc'
-                }
+            def task = """
+                        dpkg-buildpackage -us -uc
+                       """
+            dir("${WORKSPACE}/src/Linux") {
+                oe.ContainerRun("az-dcap-tools-${version}", 'clang-7', task)
             }
 
-            // Clone openenclave repo
-            dir('openenclave') {
-                git url: 'https://github.com/Microsoft/openenclave.git'
-            }
             /*
-            Use oetools-azure Dockerfile from Openenclave repository
+            Use oetools-full-${version} Dockerfile from Openenclave repository
             Remove the installed az-dcap-client from the container
             Install az-dcap-client in the container from the deb package we previously built
             then install the open-enclave package and run the samples
             */
-            def oetoolsImage = docker.build("oetools-test-${version}", "${buildArgs} -f openenclave/.jenkins/Dockerfile ./openenclave")
-            /*
-            This is build from oetoolsImage, must be built without cache so it actually installs
-            the current build of az-dcap-client from the .deb we just built
-            and installs open-enclave release candidate
-            */
-            buildArgs += dockerBuildArgs("oeinstall=true")
-            def testImage = docker.build("az-dcap-test-${version}", "${buildArgs} --no-cache -f .jenkins/Dockerfile.scripts .")
-            testImage.inside('--device /dev/sgx:/dev/sgx') {
-                dir('samples') {
-                    timeout(5) {
-                        sh '''. /opt/openenclave/share/openenclave/openenclaverc
-                            cp -r /opt/openenclave/share/openenclave/samples/ ~/samples
-                            for DIR in $(find ~/samples/* -maxdepth 0 -type d); do
-                              cd $DIR
-                              make build
-                              make run
-                            done'''
-                    }
-                }
+            def task = """
+                        apt remove -y az-dcap-client
+                        dpkg -i az-dcap-client_*_amd64.deb
+                        apt-get install -y open-enclave
+                        . /opt/openenclave/share/openenclave/openenclaverc
+                        cp -r /opt/openenclave/share/openenclave/samples/ ~/samples
+                        for DIR in $(find ~/samples/* -maxdepth 0 -type d); do
+                            cd $DIR
+                            make build
+                            make run
+                        done
+                        """
+            dir("${WORKSPACE}/src") {
+                oe.ContainerRun("oetools-full-${version}", 'clang-7', task, '-u root --device /dev/sgx:/dev/sgx')
             }
         }
     }
